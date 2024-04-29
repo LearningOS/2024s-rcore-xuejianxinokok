@@ -20,9 +20,11 @@ use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
+use crate::timer::get_time_ms;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
+use crate::config::MAX_SYSCALL_NUM;
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -79,6 +81,8 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
+        // 记录开始时间
+        next_task.start_time = get_time_ms();
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -140,6 +144,11 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            // 只在第一次运行时记录开始时间
+            if inner.tasks[next].start_time<=0 {
+                // 记录开始时间
+                 inner.tasks[next].start_time = get_time_ms();
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -152,6 +161,19 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+
+    /// 增加当前系统调用次数
+    fn inc_current_syscall_times(&self,syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_times[syscall_id] +=1;
+    }
+    /// 获取当前进程信息
+    fn get_current_task_info(&self)->(TaskStatus,[u32; MAX_SYSCALL_NUM],usize){
+        let  inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        (inner.tasks[current].task_status,inner.tasks[current].syscall_times,inner.tasks[current].start_time)
     }
 }
 
@@ -201,4 +223,14 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+
+/// 增加当前进程系统调用次数
+pub fn  inc_current_syscall_times(syscall_id: usize){
+    TASK_MANAGER.inc_current_syscall_times(syscall_id);
+}
+/// 获取当前进程信息
+pub fn get_current_task_info()->(TaskStatus,[u32; MAX_SYSCALL_NUM],usize){
+    TASK_MANAGER.get_current_task_info()
 }
