@@ -16,15 +16,15 @@ mod task;
 
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
-use crate::timer::get_time_ms;
 pub use task::{TaskControlBlock, TaskStatus};
 
-pub use context::TaskContext;
 use crate::config::MAX_SYSCALL_NUM;
+pub use context::TaskContext;
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -145,9 +145,9 @@ impl TaskManager {
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
             // 只在第一次运行时记录开始时间
-            if inner.tasks[next].start_time<=0 {
+            if inner.tasks[next].start_time <= 0 {
                 // 记录开始时间
-                 inner.tasks[next].start_time = get_time_ms();
+                inner.tasks[next].start_time = get_time_ms();
             }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
@@ -164,16 +164,34 @@ impl TaskManager {
     }
 
     /// 增加当前系统调用次数
-    fn inc_current_syscall_times(&self,syscall_id: usize) {
+    fn inc_current_syscall_times(&self, syscall_id: usize) {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        inner.tasks[current].syscall_times[syscall_id] +=1;
+        inner.tasks[current].syscall_times[syscall_id] += 1;
     }
     /// 获取当前进程信息
-    fn get_current_task_info(&self)->(TaskStatus,[u32; MAX_SYSCALL_NUM],usize){
-        let  inner = self.inner.exclusive_access();
+    fn get_current_task_info(&self) -> (TaskStatus, [u32; MAX_SYSCALL_NUM], usize) {
+        let inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        (inner.tasks[current].task_status,inner.tasks[current].syscall_times,inner.tasks[current].start_time)
+        (
+            inner.tasks[current].task_status,
+            inner.tasks[current].syscall_times,
+            inner.tasks[current].start_time,
+        )
+    }
+
+    /// 隐射内存
+    pub fn map_memory(&self, start: usize, len: usize, port: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].map_memory(start, len, port)
+    }
+
+    /// 取消内存隐射
+    pub fn unmap_memory(&self, start: usize, len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].unmap_memory(start, len)
     }
 }
 
@@ -225,12 +243,21 @@ pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
 }
 
-
 /// 增加当前进程系统调用次数
-pub fn  inc_current_syscall_times(syscall_id: usize){
+pub fn inc_current_syscall_times(syscall_id: usize) {
     TASK_MANAGER.inc_current_syscall_times(syscall_id);
 }
 /// 获取当前进程信息
-pub fn get_current_task_info()->(TaskStatus,[u32; MAX_SYSCALL_NUM],usize){
+pub fn get_current_task_info() -> (TaskStatus, [u32; MAX_SYSCALL_NUM], usize) {
     TASK_MANAGER.get_current_task_info()
+}
+
+/// 隐射内存
+pub fn map_memory(start: usize, len: usize, port: usize) -> isize {
+    TASK_MANAGER.map_memory(start, len, port)
+}
+
+/// 取消内存隐射
+pub fn unmap_memory(start: usize, len: usize) -> isize {
+    TASK_MANAGER.unmap_memory(start, len)
 }

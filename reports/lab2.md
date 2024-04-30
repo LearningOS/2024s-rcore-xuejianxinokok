@@ -1,3 +1,7 @@
+## 判断重叠
+
+https://www.cnblogs.com/honpey/p/4587510.html
+
 ## todo!
 
 If TaskInfo is split across two pages in memory, you need to ensure that you handle the write operation carefully to avoid overwriting or misaligning memory. When dealing with volatile memory, particularly in embedded systems programming where this scenario might occur, you typically want to ensure that the write operation is atomic and that it properly handles the split across pages.

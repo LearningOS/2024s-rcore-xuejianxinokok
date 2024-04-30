@@ -262,6 +262,71 @@ impl MemorySet {
             false
         }
     }
+
+    /// 判断映射的空间是否重叠
+    // #[allow(unused)]
+    fn is_overlapping(&self, start: VirtAddr, end: VirtAddr) -> bool {
+        if let Some(_area) = self.areas.iter().find(|area| {
+            intervals_overlap(
+                start.floor(),
+                end.ceil(),
+                area.vpn_range.get_start(),
+                area.vpn_range.get_end(),
+            )
+        }) {
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 添加内存隐射
+    pub fn map_memory(&mut self, start: VirtAddr, end: VirtAddr, port: u8) -> isize {
+        //1. 遍历 memory_set 判断  [start, start + len) 中存在已经被映射的页
+        let is_exist = self.is_overlapping(start, end);
+        if is_exist {
+            return -1;
+        }
+        // 写死用于测试
+        // 只保留低3位 7=111
+        // let permission=Some( MapPermission::R|MapPermission::W|MapPermission::U);
+        // let permission=MapPermission::from_bits((3  & 0x7)<< 1 );
+        let permission = MapPermission::from_bits((port & 0x7) << 1);
+        if let Some(p) = permission {
+            //你增加 PTE_U 了吗？
+            self.insert_framed_area(start, end, p | MapPermission::U);
+            0
+        } else {
+            -1
+        }
+    }
+
+    /// 取消内存隐射
+    pub fn unmap_memory(&mut self, start: VirtAddr, end: VirtAddr) -> isize {
+        let mut index: i32 = -1;
+
+        for (i, area) in self.areas.iter().enumerate() {
+            // if start.floor()>=area.vpn_range.get_start() && end.ceil()<=area.vpn_range.get_end() {
+            if start.floor() == area.vpn_range.get_start() && end.ceil() == area.vpn_range.get_end()
+            {
+                index = i as i32;
+                break;
+            }
+        }
+        // 没有找到
+        if index >= 0 {
+            let mut map_area = self.areas.remove(index as usize);
+            map_area.unmap(&mut self.page_table);
+            0
+        } else {
+            -1
+        }
+    }
+}
+
+/// 判断2个区间是否重叠
+fn intervals_overlap<T: PartialOrd>(a_start: T, a_end: T, b_start: T, b_end: T) -> bool {
+    a_start < b_end && b_start < a_end
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {

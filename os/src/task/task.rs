@@ -1,6 +1,6 @@
 //! Types related to task management
 use super::TaskContext;
-use crate::config::{TRAP_CONTEXT_BASE,MAX_SYSCALL_NUM};
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
@@ -13,8 +13,6 @@ pub struct TaskControlBlock {
 
     /// Maintain the execution status of the current process
     pub task_status: TaskStatus,
-
-    
 
     /// Application address space
     pub memory_set: MemorySet,
@@ -70,8 +68,8 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
-            start_time :0,
-            syscall_times:[0; MAX_SYSCALL_NUM]
+            start_time: 0,
+            syscall_times: [0; MAX_SYSCALL_NUM],
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
@@ -91,7 +89,7 @@ impl TaskControlBlock {
         if new_brk < self.heap_bottom as isize {
             return None;
         }
-        let result = if size < 0 {
+        let result: bool = if size < 0 {
             self.memory_set
                 .shrink_to(VirtAddr(self.heap_bottom), VirtAddr(new_brk as usize))
         } else {
@@ -104,6 +102,20 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// 隐射内存
+    pub fn map_memory(&mut self, start: usize, len: usize, port: usize) -> isize {
+        let start_va = VirtAddr(start);
+        let end_va = VirtAddr(start + len);
+        self.memory_set.map_memory(start_va, end_va, port as u8)
+    }
+
+    /// 取消内存隐射
+    pub fn unmap_memory(&mut self, start: usize, len: usize) -> isize {
+        let start_va = VirtAddr(start);
+        let end_va = VirtAddr(start + len);
+        self.memory_set.unmap_memory(start_va, end_va)
     }
 }
 
