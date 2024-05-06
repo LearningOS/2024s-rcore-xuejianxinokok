@@ -187,6 +187,10 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel:pid[{}] sys_munmap", current_task().unwrap().pid.0);
+    // 开始地址对齐4k
+    if (start & 0xFFF) != 0  {
+        return -1;
+    }
     current_task().unwrap().unmap_memory(start, len)
 }
 
@@ -204,7 +208,7 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
     trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_spawn",
         current_task().unwrap().pid.0
     );
     -1
@@ -213,7 +217,7 @@ pub fn sys_spawn(_path: *const u8) -> isize {
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority",
         current_task().unwrap().pid.0
     );
     -1
