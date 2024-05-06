@@ -188,7 +188,7 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
 pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel:pid[{}] sys_munmap", current_task().unwrap().pid.0);
     // 开始地址对齐4k
-    if (start & 0xFFF) != 0  {
+    if (start & 0xFFF) != 0 {
         return -1;
     }
     current_task().unwrap().unmap_memory(start, len)
@@ -206,12 +206,39 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_spawn(path: *const u8) -> isize {
+    trace!("kernel:pid[{}] sys_spawn", current_task().unwrap().pid.0);
+
+    // let current_task = current_task().unwrap();
+    // let new_task = current_task.spawn();
+    // let new_pid = new_task.pid.0;
+    // // modify trap context of new_task, because it returns immediately after switching
+    // let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+    // // we do not have to move to next instruction since we have done it before
+    // // for child process, fork returns 0
+    // trap_cx.x[10] = 0;
+    // // add new task to scheduler
+    // add_task(new_task);
+    // new_pid as isize
+
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let current_task = current_task().unwrap();
+        // task.exec(data);
+        let new_task = current_task.spawn(data);
+        let new_pid = new_task.pid.0;
+        // modify trap context of new_task, because it returns immediately after switching
+        let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+        // we do not have to move to next instruction since we have done it before
+        // for child process, fork returns 0
+        trap_cx.x[10] = 0;
+        // add new task to scheduler
+        add_task(new_task);
+        new_pid as isize
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
