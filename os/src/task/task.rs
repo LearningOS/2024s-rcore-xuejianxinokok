@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
+use crate::config::{DEFAULT_PRIPORITY, MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -73,6 +73,11 @@ pub struct TaskControlBlockInner {
     pub start_time: usize,
     /// 系统调用次数
     pub syscall_times: [u32; MAX_SYSCALL_NUM],
+
+    // 进程的Stride值
+    pub stride: usize,
+    // 进程的优先级
+    pub priority: isize,
 }
 
 impl TaskControlBlockInner {
@@ -125,6 +130,8 @@ impl TaskControlBlock {
                     program_brk: user_sp,
                     start_time: 0,
                     syscall_times: [0; MAX_SYSCALL_NUM],
+                    stride: 0,
+                    priority: DEFAULT_PRIPORITY,
                 })
             },
         };
@@ -200,6 +207,8 @@ impl TaskControlBlock {
                     program_brk: parent_inner.program_brk,
                     start_time: 0,
                     syscall_times: [0; MAX_SYSCALL_NUM],
+                    stride: 0,
+                    priority: DEFAULT_PRIPORITY,
                 })
             },
         });
@@ -303,6 +312,8 @@ impl TaskControlBlock {
                     program_brk: parent_inner.program_brk,
                     start_time: 0,
                     syscall_times: [0; MAX_SYSCALL_NUM],
+                    stride: 0,
+                    priority: DEFAULT_PRIPORITY,
                 })
             },
         });
@@ -336,6 +347,12 @@ impl TaskControlBlock {
 
         // return
         task_control_block
+    }
+
+    /// 增加当前系统调用次数
+    pub fn set_priority(&self, priority: isize) {
+        let mut inner = self.inner.exclusive_access();
+        inner.priority = priority;
     }
 }
 

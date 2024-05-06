@@ -7,6 +7,7 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
+use crate::config::BIG_STRIDE;
 use crate::sync::UPSafeCell;
 use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
@@ -62,6 +63,10 @@ pub fn run_tasks() {
             let mut task_inner = task.inner_exclusive_access();
             let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
             task_inner.task_status = TaskStatus::Running;
+
+            //对于获得调度的进程P，将对应的stride加上其对应的步长pass（只与进程的优先权有关系）
+            let pass = BIG_STRIDE / task_inner.priority as usize;
+            task_inner.stride += pass;
 
             // 只在第一次运行时记录开始时间
             if task_inner.start_time <= 0 {
