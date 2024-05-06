@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -68,6 +68,11 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    ///  启动时间(单位ms)
+    pub start_time: usize,
+    /// 系统调用次数
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
 }
 
 impl TaskControlBlockInner {
@@ -118,6 +123,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    start_time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
                 })
             },
         };
@@ -191,6 +198,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    start_time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
                 })
             },
         });
@@ -235,6 +244,32 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+    /// 增加当前系统调用次数
+    pub fn inc_current_syscall_times(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        inner.syscall_times[syscall_id] += 1;
+    }
+    /// 获取当前进程信息
+    pub fn get_current_task_info(&self) -> (TaskStatus, [u32; MAX_SYSCALL_NUM], usize) {
+        let inner = self.inner.exclusive_access();
+        (inner.task_status, inner.syscall_times, inner.start_time)
+    }
+
+    /// 隐射内存
+    pub fn map_memory(&self, start: usize, len: usize, port: usize) -> isize {
+        let start_va = VirtAddr(start);
+        let end_va = VirtAddr(start + len);
+        let mut inner = self.inner_exclusive_access();
+        inner.memory_set.map_memory(start_va, end_va, port as u8)
+    }
+
+    /// 取消内存隐射
+    pub fn unmap_memory(&self, start: usize, len: usize) -> isize {
+        let start_va = VirtAddr(start);
+        let end_va = VirtAddr(start + len);
+        let mut inner = self.inner_exclusive_access();
+        inner.memory_set.unmap_memory(start_va, end_va)
     }
 }
 
