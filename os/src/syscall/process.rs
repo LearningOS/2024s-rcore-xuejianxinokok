@@ -253,7 +253,7 @@ pub fn sys_set_priority(prio: isize) -> isize {
     }
 
     current_task().unwrap().set_priority(prio);
-    0
+    prio
 }
 
 /// 增加系统调用统计
