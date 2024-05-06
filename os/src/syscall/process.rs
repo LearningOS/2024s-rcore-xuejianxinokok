@@ -5,11 +5,12 @@ use alloc::sync::Arc;
 use crate::{
     config::MAX_SYSCALL_NUM,
     fs::{open_file, OpenFlags},
-    mm::{translated_refmut, translated_str},
+    mm::{translated_byte_buffer,translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next, TaskStatus,
     },
+    timer::{get_time_ms, get_time_us},
 };
 
 #[repr(C)]
@@ -117,41 +118,76 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    trace!("kernel:pid[{}] sys_get_time", current_task().unwrap().pid.0);
+    let us = get_time_us();
+    let time = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+
+    //获取数据长度
+    let len: usize = core::mem::size_of::<TimeVal>();
+    let buf: *const u8 = ts as *const u8;
+    let mut buffers = translated_byte_buffer(current_user_token(), buf, len);
+    let src_ptr = &time as *const TimeVal;
+    // 注意此处不能获取buffers.as_mut_ptr()
+    let dst_ptr: *mut TimeVal = buffers[0].as_mut_ptr() as *mut TimeVal;
+    unsafe {
+        //第三个参数应该是1 还是len ??
+        core::ptr::copy_nonoverlapping(src_ptr, dst_ptr, 1);
+    }
+
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
-pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!(
-        "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_task_info",
         current_task().unwrap().pid.0
     );
-    -1
+    // 获取当前毫秒
+    let current_ms: usize = get_time_ms();
+    let (status, syscall_times, start_time) = current_task().unwrap().get_current_task_info();
+    let info = TaskInfo {
+        status: status,
+        syscall_times: syscall_times,
+        time: current_ms - start_time,
+    };
+
+    //获取数据长度
+    let len: usize = core::mem::size_of::<TaskInfo>();
+    let buf: *const u8 = ti as *const u8;
+    let mut buffers = translated_byte_buffer(current_user_token(), buf, len);
+    let src_ptr = &info as *const TaskInfo;
+    let dst_ptr: *mut TaskInfo = buffers[0].as_mut_ptr() as *mut TaskInfo;
+    unsafe {
+        core::ptr::copy_nonoverlapping(src_ptr, dst_ptr, 1);
+    }
+    0
 }
 
 /// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
+    trace!("kernel:pid[{}] sys_mmap", current_task().unwrap().pid.0);
+    // 判断前3种错误情况
+    if (start & 0xFFF) != 0 || (port & !0x7) != 0 || (port & 0x7) == 0 {
+        return -1;
+    }
+    current_task().unwrap().map_memory(start, len, port)
 }
 
 /// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    trace!("kernel:pid[{}] sys_munmap", current_task().unwrap().pid.0);
+    // 开始地址对齐4k
+    if (start & 0xFFF) != 0 {
+        return -1;
+    }
+    current_task().unwrap().unmap_memory(start, len)
 }
 
 /// change data segment size
@@ -166,19 +202,67 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_spawn(path: *const u8) -> isize {
+    trace!("kernel:pid[{}] sys_spawn", current_task().unwrap().pid.0);
+
+    // let current_task = current_task().unwrap();
+    // let new_task = current_task.spawn();
+    // let new_pid = new_task.pid.0;
+    // // modify trap context of new_task, because it returns immediately after switching
+    // let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+    // // we do not have to move to next instruction since we have done it before
+    // // for child process, fork returns 0
+    // trap_cx.x[10] = 0;
+    // // add new task to scheduler
+    // add_task(new_task);
+    // new_pid as isize
+
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+
+        let all_data = app_inode.read_all();
+        let current_task = current_task().unwrap();
+        let new_task= current_task.spawn(all_data.as_slice());
+
+
+        //let current_task = current_task().unwrap();
+        // task.exec(data);
+        // let new_task = current_task.spawn(data);
+
+        let new_pid = new_task.pid.0;
+        // modify trap context of new_task, because it returns immediately after switching
+        let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+        // we do not have to move to next instruction since we have done it before
+        // for child process, fork returns 0
+        trap_cx.x[10] = 0;
+        // add new task to scheduler
+        add_task(new_task);
+        new_pid as isize
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
+pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority",
         current_task().unwrap().pid.0
     );
-    -1
+    //stride 调度要求进程优先级 ，所以设定进程优先级 会导致错误
+    if prio < 2 {
+        return -1;
+    }
+
+    current_task().unwrap().set_priority(prio);
+    prio
 }
+
+/// 增加系统调用统计
+pub fn inc_syscall_times(syscall_id: usize) -> () {
+    current_task()
+        .unwrap()
+        .inc_current_syscall_times(syscall_id);
+}
+

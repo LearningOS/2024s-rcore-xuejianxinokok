@@ -23,7 +23,23 @@ impl TaskManager {
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        // self.ready_queue.pop_front()
+
+        //stride 算法要找到 stride 最小的进程，使用优先级队列是效率不错的办法，
+        //但是我们的实验测例很简单，所以效率完全不是问题。事实上，很推荐使用暴力扫一遍的办法找最小值。
+
+        let next_task = self
+            .ready_queue
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                a.inner_exclusive_access()
+                    .stride
+                    .cmp(&b.inner_exclusive_access().stride)
+            })
+            .map(|(index, _)| index);
+
+        next_task.map(|index| self.ready_queue.remove(index).unwrap())
     }
 }
 

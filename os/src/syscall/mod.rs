@@ -61,6 +61,8 @@ use crate::fs::Stat;
 
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
+    // 这里应该判断syscall_id 范围
+    inc_syscall_times(syscall_id);
     match syscall_id {
         SYSCALL_OPEN => sys_open(args[1] as *const u8, args[2] as u32),
         SYSCALL_CLOSE => sys_close(args[0]),
