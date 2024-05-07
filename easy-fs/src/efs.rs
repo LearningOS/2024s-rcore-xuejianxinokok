@@ -109,7 +109,7 @@ impl EasyFileSystem {
         // acquire efs lock temporarily
         let (block_id, block_offset) = efs.lock().get_disk_inode_pos(0);
         // release efs lock
-        Inode::new(block_id, block_offset, Arc::clone(efs), block_device)
+        Inode::new(block_id, block_offset, 0, Arc::clone(efs), block_device)
     }
     /// Get inode by id
     pub fn get_disk_inode_pos(&self, inode_id: u32) -> (u32, usize) {
@@ -128,6 +128,13 @@ impl EasyFileSystem {
     /// Allocate a new inode
     pub fn alloc_inode(&mut self) -> u32 {
         self.inode_bitmap.alloc(&self.block_device).unwrap() as u32
+    }
+    ///  dealloc a  inode
+    pub fn dealloc_inode(&mut self, block_id: usize, _block_offset: usize) -> u32 {
+        // let bit = block_id * BLOCK_SZ * 8 + block_offset;
+        let bit =block_id - self.inode_area_start_block as usize;
+        self.inode_bitmap.dealloc(&self.block_device, bit);
+        0
     }
 
     /// Allocate a data block

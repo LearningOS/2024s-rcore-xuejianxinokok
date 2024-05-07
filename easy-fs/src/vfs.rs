@@ -1,3 +1,5 @@
+use core::ops::Index;
+
 use super::{
     block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, DiskInode, DiskInodeType,
     EasyFileSystem, DIRENT_SZ,
@@ -10,6 +12,8 @@ use spin::{Mutex, MutexGuard};
 pub struct Inode {
     block_id: usize,
     block_offset: usize,
+    /// inode 文件所在 inode 编号
+    inode_id: u32,
     fs: Arc<Mutex<EasyFileSystem>>,
     block_device: Arc<dyn BlockDevice>,
 }
@@ -19,12 +23,14 @@ impl Inode {
     pub fn new(
         block_id: u32,
         block_offset: usize,
+        inode_id: u32,
         fs: Arc<Mutex<EasyFileSystem>>,
         block_device: Arc<dyn BlockDevice>,
     ) -> Self {
         Self {
             block_id: block_id as usize,
             block_offset,
+            inode_id,
             fs,
             block_device,
         }
@@ -67,6 +73,7 @@ impl Inode {
                 Arc::new(Self::new(
                     block_id,
                     block_offset,
+                    inode_id,
                     self.fs.clone(),
                     self.block_device.clone(),
                 ))
@@ -133,6 +140,7 @@ impl Inode {
         Some(Arc::new(Self::new(
             block_id,
             block_offset,
+            new_inode_id,
             self.fs.clone(),
             self.block_device.clone(),
         )))
@@ -182,5 +190,129 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+
+    /// Read stat data from current inode
+    pub fn stat(&self) -> (bool, bool, u32, u32) {
+        let _fs = self.fs.lock();
+        let (is_dir, is_file, nlink) = self.read_disk_inode(|disk_inode| {
+            (disk_inode.is_dir(), disk_inode.is_file(), disk_inode.nlink)
+        });
+
+        (is_dir, is_file, nlink, self.inode_id)
+    }
+
+    /// link inode under current inode by name
+    pub fn linkat(&self, parent_inode: Arc<Inode>, new_path: &str) -> isize {
+        let mut fs = self.fs.lock();
+        //在父目录创建new_path
+        parent_inode.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            // write dirent
+            let dirent = DirEntry::new(new_path, self.inode_id);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+
+        //修改原文件inode link
+        let r = self.modify_disk_inode(|disk_inode| {
+            disk_inode.nlink += 1;
+            disk_inode.nlink
+        });
+        block_cache_sync_all();
+
+        //r as isize
+        0
+    }
+
+    /// link inode under current inode by name
+    pub fn unlinkat(&self, parent_inode: Arc<Inode>, path: &str) -> isize {
+        //在父目录删除 path,如何删除?
+        // parent_inode.modify_disk_inode(|root_inode| {
+        //     // append file in the dirent
+        //     let file_count = (root_inode.size as usize) / DIRENT_SZ;
+        //     let new_size = (file_count - 1) * DIRENT_SZ;
+        //     // increase size
+        //     self.increase_size(new_size as u32, root_inode, &mut fs);
+        //     // write dirent
+        //     let dirent = DirEntry::empty();
+
+        //     root_inode.write_at(
+        //         file_count * DIRENT_SZ,
+        //         dirent.as_bytes(),
+        //         &self.block_device,
+        //     );
+        // });
+
+        let mut fs: MutexGuard<EasyFileSystem> = self.fs.lock();
+        let mut idx= -1i32;
+        //查找
+        parent_inode.read_disk_inode(|disk_inode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+
+                if dirent.name()==path{
+                    idx=  i  as i32;
+                    break;
+                }
+            }
+        });
+        //修改
+         parent_inode.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count - 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            // write dirent
+            let dirent = DirEntry::empty();
+
+            root_inode.write_at(
+                idx as usize * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+
+
+
+        //修改原文件inode link
+        let r = self.modify_disk_inode(|disk_inode| {
+            //如果硬链接树小于1
+            if disk_inode.nlink < 1 {
+                return -1;
+            }
+
+            if disk_inode.nlink == 1 {
+                disk_inode.nlink = 0;
+                // self.clear();
+            } else if disk_inode.nlink > 1 {
+                disk_inode.nlink -= 1;
+            }
+            disk_inode.nlink as isize
+        });
+
+        if r == 0 {
+            // fs.dealloc_inode(self.block_id,self.block_offset);
+            // 这里必须释放 fs,否则clear 方法中会阻塞
+            drop(fs);
+            self.clear();
+        } else {
+            block_cache_sync_all();
+        }
+        // r as isize
+        0
     }
 }

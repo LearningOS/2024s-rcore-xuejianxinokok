@@ -12,7 +12,7 @@ pub struct Bitmap {
 
 /// Decompose bits into (block_pos, bits64_pos, inner_pos)
 fn decomposition(mut bit: usize) -> (usize, usize, usize) {
-    let block_pos = bit / BLOCK_BITS;
+    let block_pos = bit / BLOCK_BITS; // BLOCK_BITS=512*8=4096
     bit %= BLOCK_BITS;
     (block_pos, bit / 64, bit % 64)
 }

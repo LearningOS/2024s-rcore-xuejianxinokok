@@ -4,7 +4,7 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
-use super::File;
+use super::{File, Stat, StatMode};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
@@ -34,6 +34,7 @@ impl OSInode {
         Self {
             readable,
             writable,
+            // ino,
             inner: unsafe { UPSafeCell::new(OSInodeInner { offset: 0, inode }) },
         }
     }
@@ -154,5 +155,34 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    /// 获取打开文件的元数据
+    fn stat(&self) -> Stat {
+        let inner = self.inner.exclusive_access();
+        let (is_dir, is_file, nlink, inode_id) = inner.inode.stat();
+        drop(inner);
+        let mut st = Stat::new();
+        st.ino = inode_id as u64;
+        st.nlink = nlink;
+        if is_dir {
+            st.mode = StatMode::DIR;
+        } else if is_file {
+            st.mode = StatMode::FILE;
+        }
+        st
+    }
+    /// link a file to new_path
+    fn link(&self, new_path: &str) -> isize {
+        let inner = self.inner.exclusive_access();
+        let r = inner.inode.linkat(ROOT_INODE.clone(), new_path);
+        drop(inner);
+        r
+    }
+    /// unlink a file from path
+    fn unlink(&self, path: &str) -> isize {
+        let inner = self.inner.exclusive_access();
+        let r = inner.inode.unlinkat(ROOT_INODE.clone(), path);
+        drop(inner);
+        r
     }
 }
