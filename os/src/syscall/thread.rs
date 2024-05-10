@@ -3,7 +3,7 @@ use crate::{
     task::{add_task, current_task, TaskControlBlock},
     trap::{trap_handler, TrapContext},
 };
-use alloc::{sync::Arc,vec};
+use alloc::{sync::Arc, vec};
 /// thread create syscall
 pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
     trace!(
@@ -43,19 +43,26 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
         tasks.push(None);
     }
     tasks[new_task_tid] = Some(Arc::clone(&new_task));
-    
 
     // -------死锁检测相关
-    let mutex_count=process_inner.mutex_detector.available.len();
-    let semaphore_count=process_inner.semaphore_detector.available.len();
+    let mutex_count = process_inner.mutex_detector.available.len();
+    let semaphore_count = process_inner.semaphore_detector.available.len();
     while before_tasks_len < new_task_tid + 1 {
-        process_inner.mutex_detector.allocation.push(vec![0; mutex_count]);
+        process_inner
+            .mutex_detector
+            .allocation
+            .push(vec![0; mutex_count]);
         process_inner.mutex_detector.need.push(vec![0; mutex_count]);
 
-        
-        process_inner.semaphore_detector.allocation.push(vec![0; semaphore_count]);
-        process_inner.semaphore_detector.need.push(vec![0; semaphore_count]);
-        before_tasks_len+=1;
+        process_inner
+            .semaphore_detector
+            .allocation
+            .push(vec![0; semaphore_count]);
+        process_inner
+            .semaphore_detector
+            .need
+            .push(vec![0; semaphore_count]);
+        before_tasks_len += 1;
     }
 
     let new_task_trap_cx = new_task_inner.get_trap_cx();

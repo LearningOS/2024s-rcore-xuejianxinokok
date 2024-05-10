@@ -155,11 +155,11 @@ impl ProcessControlBlock {
         let mut process_inner = process.inner_exclusive_access();
         process_inner.tasks.push(Some(Arc::clone(&task)));
 
-        // -------死锁检测相关
-        process_inner.mutex_detector.allocation.push(Vec::with_capacity(0));
-        process_inner.mutex_detector.need.push(Vec::with_capacity(0));
-        process_inner.semaphore_detector.allocation.push(Vec::with_capacity(0));
-        process_inner.semaphore_detector.need.push(Vec::with_capacity(0));
+        // -------死锁检测相关,在结构体已经初始化
+        //process_inner.mutex_detector.allocation.push(Vec::with_capacity(0));
+        //process_inner.mutex_detector.need.push(Vec::with_capacity(0));
+        //process_inner.semaphore_detector.allocation.push(Vec::with_capacity(0));
+        //process_inner.semaphore_detector.need.push(Vec::with_capacity(0));
 
         drop(process_inner);
         insert_into_pid2process(process.getpid(), Arc::clone(&process));
@@ -329,11 +329,11 @@ impl ProcessControlBlock {
 /// 参考 https://learningos.cn/rCore-Tutorial-Guide-2024S/chapter8/5exercise.html
 pub struct BankerDeadlockDetector {
     /// 可利用资源向量 Available ：含有 m 个元素的一维数组，每个元素代表可利用的某一类资源的数目， 其初值是该类资源的全部可用数目，其值随该类资源的分配和回收而动态地改变。 Available[j] = k，表示第 j 类资源的可用数量为 k。
-    pub available: Vec<usize>,
+    pub available: Vec<isize>,
     /// 分配矩阵 Allocation：n * m 矩阵，表示每类资源已分配给每个线程的资源数。 Allocation[i,j] = g，则表示线程 i 当前己分得第 j 类资源的数量为 g。
-    pub allocation: Vec<Vec<usize>>,
+    pub allocation: Vec<Vec<isize>>,
     /// 需求矩阵 Need：n * m 的矩阵，表示每个线程还需要的各类资源数量。 Need[i,j] = d，则表示线程 i 还需要第 j 类资源的数量为 d 。
-    pub need: Vec<Vec<usize>>,
+    pub need: Vec<Vec<isize>>,
 }
 
 impl BankerDeadlockDetector {
@@ -347,35 +347,38 @@ impl BankerDeadlockDetector {
 
     /// 死锁检测算法,检测是否安全状态
     pub fn is_safe_state(&self) -> (bool, Vec<usize>) {
+
+       
+
         let n = self.allocation.len();
         let m = self.available.len();
 
-        //1.设置两个向量
-        //work表示操作系统可提供给线程继续运行所需的各类资源数目 初始时，Work = Available
+        // 1.设置两个向量
+        // work表示操作系统可提供给线程继续运行所需的各类资源数目 初始时，Work = Available
         let mut work = self.available.clone();
-        //Finish，表示系统是否有足够的资源分配给线程， 使之运行完成.初始时 Finish[0..n-1] = false表示所有线程都没结束
+        // Finish，表示系统是否有足够的资源分配给线程， 使之运行完成.初始时 Finish[0..n-1] = false表示所有线程都没结束
         let mut finish = vec![false; n];
-
+        // println!("work      : {:?}", &work);
         // 用于记录安全序列
         let mut safe_sequence = Vec::new();
 
         loop {
             let mut found = false;
             for i in 0..n {
-                //2. 从线程集合中找到一个能满足下述条件的线程
+                // 2. 从线程集合中找到一个能满足下述条件的线程
                 // Finish[i] == false;
                 // Need[i,j] ≤ Work[j];
                 // 若找到，执行步骤 3
                 if !finish[i] && (0..m).all(|j| self.need[i][j] <= work[j]) {
-                    // 线程i可以运行
+
+                    // 3.当线程 thr[i] 获得资源后，可顺利执行，直至完成，并释放出分配给它的资源，故应执行:
+                    // Work[j] = Work[j] + Allocation[i, j];
+                    // Finish[i] = true; //当有足够资源分配给线程时
                     for j in 0..m {
                         work[j] += self.allocation[i][j];
                     }
-
-                    //3.当线程 thr[i] 获得资源后，可顺利执行，直至完成，并释放出分配给它的资源，故应执行:
-                    // Work[j] = Work[j] + Allocation[i, j];
-                    // Finish[i] = true; //当有足够资源分配给线程时
                     finish[i] = true;
+
                     safe_sequence.push(i);
                     found = true;
                     break;
@@ -387,7 +390,15 @@ impl BankerDeadlockDetector {
                 break;
             }
         }
-        //4.如果 Finish[0..n-1] 都为 true，则表示系统处于安全状态；否则表示系统处于不安全状态，即出现死锁。
+
+        // println!("workend   : {:?}", &work);
+        // println!("available : {:?}", &self.available);
+        // println!("allocation: {:?}", &self.allocation,);
+        // println!("need      : {:?}", &self.need);
+        // println!("finish    : {:?}", &finish);
+        // println!("---------------------------------");
+
+        // 4.如果 Finish[0..n-1] 都为 true，则表示系统处于安全状态；否则表示系统处于不安全状态，即出现死锁。
         // 检查是否所有线程都已完成
         if finish.iter().all(|&x| x) {
             (true, safe_sequence) // 安全序列

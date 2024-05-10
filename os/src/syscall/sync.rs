@@ -175,11 +175,11 @@ pub fn sys_semaphore_create(res_count: usize) -> isize {
         process_inner.semaphore_list[id] = Some(Arc::new(Semaphore::new(res_count)));
 
         // -------死锁检测相关
-        //可利用资源向量
-        process_inner.semaphore_detector.available[id] = res_count;
-        for i in 0.. process_inner.tasks.len(){
-          process_inner.semaphore_detector.allocation[i][id]=0;
-          process_inner.semaphore_detector.need[i][id]=0;
+        //可利用资源向量,如果id是复用之前的
+        process_inner.semaphore_detector.available[id] = res_count as isize;
+        for i in 0..process_inner.tasks.len() {
+            process_inner.semaphore_detector.allocation[i][id] = 0;
+            process_inner.semaphore_detector.need[i][id] = 0;
         }
 
         id
@@ -187,18 +187,23 @@ pub fn sys_semaphore_create(res_count: usize) -> isize {
         process_inner
             .semaphore_list
             .push(Some(Arc::new(Semaphore::new(res_count))));
+
         let id = process_inner.semaphore_list.len() - 1;
 
         // -------死锁检测相关
         //可利用资源向量
-        process_inner.semaphore_detector.available.push(res_count);
-        for i in 0.. process_inner.tasks.len(){
+        process_inner
+            .semaphore_detector
+            .available
+            .push(res_count as isize);
+        for i in 0..process_inner.tasks.len() {
             process_inner.semaphore_detector.allocation[i].push(0);
             process_inner.semaphore_detector.need[i].push(0);
         }
 
         id
     };
+    drop(process_inner);
     id as isize
 }
 /// semaphore up syscall
@@ -216,14 +221,17 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
         tid
     );
     let process = current_process();
-    let mut process_inner = process.inner_exclusive_access();
+    let process_inner = process.inner_exclusive_access();
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
+    drop(process_inner); // 一定要在up之前drop
+    sem.up();
 
     // 如果开启了死锁检测
     //if  process_inner.deadlock_detect{
     // 设置需求矩阵
-    process_inner.semaphore_detector.need.get_mut(tid).unwrap()[sem_id] -= 1;
-
+    // process_inner.semaphore_detector.need.get_mut(tid).unwrap()[sem_id] = 0;
+    let mut process_inner = process.inner_exclusive_access();
+    process_inner.semaphore_detector.available[sem_id] += 1;
     // 设置 分配矩阵,确保tid 所在vec 存在
     process_inner
         .semaphore_detector
@@ -231,9 +239,8 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
         .get_mut(tid)
         .unwrap()[sem_id] -= 1;
     //}
-
     drop(process_inner);
-    sem.up();
+
     0
 }
 /// semaphore down syscall
@@ -251,32 +258,75 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
         tid
     );
     let process = current_process();
-    let mut process_inner = process.inner_exclusive_access();
-    //开启死锁检测功能后， mutex_lock 和 semaphore_down 如果检测到死锁， 应拒绝相应操作并返回 -0xDEAD (十六进制值)
-    //这里进行死锁检测
-    // 设置需求矩阵
-    //Need[i,j] ≤ Work[j]
-    process_inner.semaphore_detector.need.get_mut(tid).unwrap()[sem_id] += 1;
 
-    // 如果开启了死锁检测
+    let mut process_inner = process.inner_exclusive_access();
+    // 请求个数
+    let request: isize = 1;
+    // 需求个数
+    process_inner.semaphore_detector.need.get_mut(tid).unwrap()[sem_id] += request;
+
+
     if process_inner.deadlock_detect {
         //这里进行死锁检测
         let (safe, _) = process_inner.semaphore_detector.is_safe_state();
         if !safe {
+            process_inner.semaphore_detector.need.get_mut(tid).unwrap()[sem_id] -= request;
+            drop(process_inner);
             //开启死锁检测功能后， mutex_lock 和 semaphore_down 如果检测到死锁， 应拒绝相应操作并返回 -0xDEAD (十六进制值)
-            return -0xdead;
+            return -0xdead; // 整数是 -57005
         }
     }
-    // 设置 分配矩阵,确保tid 所在vec 存在
-    process_inner
-        .semaphore_detector
-        .allocation
-        .get_mut(tid)
-        .unwrap()[sem_id] += 1;
 
-    let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
-    drop(process_inner);
-    sem.down();
+
+
+    // 1. 请求个数<=需求个数
+
+    // 2. 如果request 小于 available，
+    if request <= process_inner.semaphore_detector.available[sem_id] {
+        // 3.尝试分配资源
+        process_inner.semaphore_detector.available[sem_id] -= request;
+        //死锁检测通过后,设置分配矩阵allocation,确保tid 所在vec 存在
+        process_inner
+            .semaphore_detector
+            .allocation
+            .get_mut(tid)
+            .unwrap()[sem_id] += request;
+        process_inner.semaphore_detector.need.get_mut(tid).unwrap()[sem_id] -= request;
+
+        //4.  执行安全检测
+        if process_inner.deadlock_detect {
+            //这里进行死锁检测
+            let (safe, _) = process_inner.semaphore_detector.is_safe_state();
+            if safe {
+                let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
+                drop(process_inner);
+                sem.down();
+            } else {
+                //不安全
+
+                // 恢复之前状态
+                process_inner.semaphore_detector.available[sem_id] += request;
+                //死锁检测通过后,设置分配矩阵allocation,确保tid 所在vec 存在
+                process_inner
+                    .semaphore_detector
+                    .allocation
+                    .get_mut(tid)
+                    .unwrap()[sem_id] -= request;
+                process_inner.semaphore_detector.need.get_mut(tid).unwrap()[sem_id] += request;
+                drop(process_inner);
+                //开启死锁检测功能后， mutex_lock 和 semaphore_down 如果检测到死锁， 应拒绝相应操作并返回 -0xDEAD (十六进制值)
+                return -0xdead; // 整数是 -57005
+            }
+        }
+    } else {
+        // 资源不足 则等待
+        let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
+        drop(process_inner);
+        sem.down();
+    }
+
+  
+
     0
 }
 /// condvar create syscall
