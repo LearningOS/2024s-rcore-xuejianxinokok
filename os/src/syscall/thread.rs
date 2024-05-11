@@ -45,14 +45,14 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
     tasks[new_task_tid] = Some(Arc::clone(&new_task));
 
     // -------死锁检测相关
-    let mutex_count = process_inner.mutex_detector.available.len();
+    // let mutex_count = process_inner.mutex_detector.available.len();
     let semaphore_count = process_inner.semaphore_detector.available.len();
     while before_tasks_len < new_task_tid + 1 {
-        process_inner
-            .mutex_detector
-            .allocation
-            .push(vec![0; mutex_count]);
-        process_inner.mutex_detector.need.push(vec![0; mutex_count]);
+        // process_inner
+        //     .mutex_detector
+        //     .allocation
+        //     .push(vec![0; mutex_count]);
+        // process_inner.mutex_detector.need.push(vec![0; mutex_count]);
 
         process_inner
             .semaphore_detector

@@ -51,21 +51,31 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
     {
         process_inner.mutex_list[id] = mutex;
 
+       
+
         // -------死锁检测相关
-        //可利用资源向量
+        //可利用资源向量,如果id是复用之前的
         process_inner.mutex_detector.available[id] = 1;
-        process_inner.mutex_detector.allocation[tid][id] = 0;
-        process_inner.mutex_detector.need[tid][id] = 0;
+        // for i in 0..process_inner.tasks.len() {
+        //     process_inner.mutex_detector.allocation[i][id] = 0;
+        //     process_inner.mutex_detector.need[i][id] = 0;
+        // }
+
+
 
         id as isize
     } else {
         process_inner.mutex_list.push(mutex);
         let id = process_inner.mutex_list.len() - 1;
         // -------死锁检测相关
-        //可利用资源向量
-        process_inner.mutex_detector.available.push(1);
-        process_inner.mutex_detector.allocation[tid].push(0);
-        process_inner.mutex_detector.need[tid].push(0);
+        process_inner
+            .mutex_detector
+            .available
+            .push(1);
+        // for i in 0..process_inner.tasks.len() {
+        //     process_inner.mutex_detector.allocation[i].push(0);
+        //     process_inner.mutex_detector.need[i].push(0);
+        // }
 
         id as isize
     }
@@ -84,33 +94,19 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
         current_task().unwrap().process.upgrade().unwrap().getpid(),
         tid
     );
+
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-
-    // 设置需求矩阵
-    //Need[i,j] ≤ Work[j]
-    process_inner.mutex_detector.need.get_mut(tid).unwrap()[mutex_id] += 1;
-
-    // 如果开启了死锁检测
     if process_inner.deadlock_detect {
-        //这里进行死锁检测
-        let (safe, _) = process_inner.mutex_detector.is_safe_state();
-        if !safe {
-            //开启死锁检测功能后， mutex_lock 和 semaphore_down 如果检测到死锁， 应拒绝相应操作并返回 -0xDEAD (十六进制值)
-            return -0xdead;
-        }
+       if  process_inner.mutex_detector.available[mutex_id] <1{
+          return -0xdead; // 整数是 -57005
+       }
     }
-    // 设置 分配矩阵,确保tid 所在vec 存在
-    process_inner
-        .mutex_detector
-        .allocation
-        .get_mut(tid)
-        .unwrap()[mutex_id] += 1;
+    process_inner.mutex_detector.available[mutex_id]=0;
+
 
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
-
     drop(process_inner);
-    drop(process);
     mutex.lock();
 
     0
@@ -130,23 +126,25 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
         tid
     );
     let process = current_process();
-    let mut process_inner = process.inner_exclusive_access();
+    let  process_inner = process.inner_exclusive_access();
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+    drop(process_inner);
+    mutex.unlock();
+
     // 如果开启了死锁检测
     //if  process_inner.deadlock_detect{
     // 设置需求矩阵
-    process_inner.mutex_detector.need.get_mut(tid).unwrap()[mutex_id] -= 1;
-
+    let mut process_inner = process.inner_exclusive_access();
+    process_inner.mutex_detector.available[mutex_id] = 1;
     // 设置 分配矩阵,确保tid 所在vec 存在
-    process_inner
-        .mutex_detector
-        .allocation
-        .get_mut(tid)
-        .unwrap()[mutex_id] -= 1;
-    //}
+    // process_inner
+    //     .mutex_detector
+    //     .allocation
+    //     .get_mut(tid)
+    //     .unwrap()[mutex_id] = 0;
     drop(process_inner);
     drop(process);
-    mutex.unlock();
+  
     0
 }
 /// semaphore create syscall

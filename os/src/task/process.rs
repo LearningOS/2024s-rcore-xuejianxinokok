@@ -345,6 +345,7 @@ impl BankerDeadlockDetector {
         }
     }
 
+    /// 死锁检测算法不同于银行家算法
     /// 死锁检测算法,检测是否安全状态
     pub fn is_safe_state(&self) -> (bool, Vec<usize>) {
 
